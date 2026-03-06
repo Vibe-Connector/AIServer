@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import structlog
@@ -5,9 +6,29 @@ import structlog
 from app.core.exceptions import GraphNotFoundError
 from app.graph import queries
 from app.graph.repository import execute_read, execute_write
-from app.schemas.graph import NodeCreate, NodeResponse, RelationshipCreate
+from app.schemas.graph import (
+    ALLOWED_NODE_LABELS,
+    ALLOWED_RELATIONSHIP_TYPES,
+    NodeCreate,
+    NodeResponse,
+    RelationshipCreate,
+)
 
 logger = structlog.get_logger()
+
+_SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _assert_safe_identifier(value: str, context: str) -> None:
+    """런타임 방어: 식별자가 안전한 형태인지 검증"""
+    if not _SAFE_IDENTIFIER.match(value):
+        raise ValueError(f"{context}에 허용되지 않는 문자가 포함되어 있습니다: '{value}'")
+
+
+def _assert_safe_property_keys(properties: dict[str, Any]) -> None:
+    """런타임 방어: 모든 속성 키가 안전한 식별자인지 검증"""
+    for key in properties:
+        _assert_safe_identifier(key, "속성 키")
 
 
 async def get_graph_stats() -> dict:
@@ -37,6 +58,11 @@ async def get_node(element_id: str) -> NodeResponse:
 
 
 async def create_node(data: NodeCreate) -> NodeResponse:
+    # Pydantic validator가 이미 검증하지만, defense-in-depth로 재검증
+    if data.label not in ALLOWED_NODE_LABELS:
+        raise ValueError(f"허용되지 않는 노드 라벨: '{data.label}'")
+    _assert_safe_property_keys(data.properties)
+
     props = ", ".join(f"{k}: ${k}" for k in data.properties)
     query = f"CREATE (n:{data.label} {{{props}}}) RETURN n"
     records = await execute_write(query, data.properties)
@@ -49,6 +75,8 @@ async def create_node(data: NodeCreate) -> NodeResponse:
 
 
 async def update_node(element_id: str, properties: dict[str, Any]) -> NodeResponse:
+    _assert_safe_property_keys(properties)
+
     set_clause = ", ".join(f"n.{k} = ${k}" for k in properties)
     query = f"MATCH (n) WHERE elementId(n) = $element_id SET {set_clause} RETURN n"
     params = {"element_id": element_id, **properties}
@@ -68,6 +96,10 @@ async def delete_node(element_id: str) -> None:
 
 
 async def create_relationship(data: RelationshipCreate) -> dict:
+    # Pydantic validator가 이미 검증하지만, defense-in-depth로 재검증
+    if data.rel_type not in ALLOWED_RELATIONSHIP_TYPES:
+        raise ValueError(f"허용되지 않는 관계 타입: '{data.rel_type}'")
+
     query = (
         f"MATCH (a) WHERE elementId(a) = $from_id "
         f"MATCH (b) WHERE elementId(b) = $to_id "
@@ -91,6 +123,8 @@ async def delete_relationship(element_id: str) -> None:
 
 async def list_nodes(label: str | None = None, skip: int = 0, limit: int = 50) -> list[dict]:
     if label:
+        if label not in ALLOWED_NODE_LABELS:
+            raise ValueError(f"허용되지 않는 노드 라벨: '{label}'")
         query = (
             f"MATCH (n:{label}) RETURN n, labels(n) AS node_labels "
             f"ORDER BY elementId(n) SKIP $skip LIMIT $limit"
@@ -112,6 +146,15 @@ async def list_nodes(label: str | None = None, skip: int = 0, limit: int = 50) -
 
 
 async def execute_cypher(query: str, parameters: dict[str, Any] | None = None) -> list[dict]:
+    # 위험: 임의 Cypher 실행 — 쓰기 작업 차단
+    _query_upper = query.strip().upper()
+    for keyword in ("CREATE", "MERGE", "DELETE", "DETACH", "SET", "REMOVE", "DROP", "CALL"):
+        if keyword in _query_upper:
+            raise ValueError(
+                f"execute_cypher는 읽기 전용입니다. "
+                f"쓰기 키워드 '{keyword}'가 포함된 쿼리는 실행할 수 없습니다."
+            )
+
     records = await execute_read(query, parameters)
     results = []
     for record in records:
