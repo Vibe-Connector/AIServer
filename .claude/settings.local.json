@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m venv .venv && source .venv/bin/activate && pip install -e \".[dev]\" 2>&1 | tail -20)",
+      "Bash(source .venv/bin/activate && python -c \"from app.main import app; print\\('OK: FastAPI app created'\\)\")",
+      "Bash(source .venv/bin/activate && ruff check app/ --select E,F,I,W 2>&1 | head -30)",
+      "Bash(source .venv/bin/activate && ruff check app/ --select E,F,I,W 2>&1 | grep -c \"E501\")",
+      "Bash(source .venv/bin/activate && ruff check app/ --select E,F,I,W 2>&1)",
+      "Bash(source .venv/bin/activate && ruff check app/ --select E,F,I,W --fix 2>&1)",
+      "Bash(source .venv/bin/activate && python -c \"\nfrom app.main import app\nfrom app.config import settings\nfrom app.api.response import ApiResponse\nfrom app.schemas.recommend import VibeRecommendRequest, VibeRecommendResponse\nfrom app.schemas.ingest import IngestOptionsRequest, IngestItemsRequest, IngestVibeSessionRequest\nfrom app.schemas.graph import NodeCreate, RelationshipCreate\nfrom app.rag.prompt_templates import RECOMMEND_SYSTEM_PROMPT\nfrom app.rag.context_builder import build_context\nfrom app.models.nodes import MovieNode, MusicNode, CoffeeNode, LightingNode\nprint\\('All imports OK'\\)\nprint\\(f'App title: {app.title}'\\)\nprint\\(f'Routes: {len\\(app.routes\\)}'\\)\nfor r in app.routes:\n    if hasattr\\(r, 'path'\\) and hasattr\\(r, 'methods'\\):\n        print\\(f'  {r.methods} {r.path}'\\)\n\")",
+      "Bash(rm -rf .venv vibeconnector_aiserver.egg-info && python3 -m venv .venv && source .venv/bin/activate && pip install -e \".[dev]\" 2>&1 | tail -5)"
+    ]
+  }
+}
